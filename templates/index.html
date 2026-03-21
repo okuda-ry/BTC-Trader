@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BTC Auto Trader</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>BTC Auto Trader</h1>
+    <div class="controls">
+      <label class="switch">
+        <input type="checkbox" id="dryRunToggle" checked>
+        <span class="slider"></span>
+      </label>
+      <span id="modeLabel">Dry Run</span>
+      <button id="startBtn" class="btn btn-start">▶ 開始</button>
+      <button id="stopBtn" class="btn btn-stop" disabled>■ 停止</button>
+      <span id="statusBadge" class="badge badge-stopped">停止中</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- 価格・指標カード -->
+    <section class="cards">
+      <div class="card">
+        <div class="card-label">BTC/JPY</div>
+        <div class="card-value" id="price">---</div>
+      </div>
+      <div class="card">
+        <div class="card-label">RSI (14)</div>
+        <div class="card-value" id="rsi">---</div>
+      </div>
+      <div class="card">
+        <div class="card-label">MACD Histogram</div>
+        <div class="card-value" id="macdH">---</div>
+      </div>
+      <div class="card">
+        <div class="card-label">BB Position</div>
+        <div class="card-value" id="bbPos">---</div>
+      </div>
+    </section>
+
+    <!-- AI判断 -->
+    <section class="decision-box" id="decisionBox">
+      <h2>AI 判断</h2>
+      <div class="decision-content">
+        <span class="decision-action" id="decisionAction">---</span>
+        <span class="decision-confidence" id="decisionConfidence"></span>
+        <p class="decision-reason" id="decisionReason"></p>
+      </div>
+    </section>
+
+    <div class="bottom-panels">
+      <!-- 取引履歴 -->
+      <section class="panel">
+        <h2>取引履歴</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>時刻</th><th>売買</th><th>数量</th><th>価格</th><th>理由</th></tr>
+            </thead>
+            <tbody id="tradeHistory"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ログ -->
+      <section class="panel">
+        <h2>ログ</h2>
+        <div class="log-area" id="logArea"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const dryRunToggle = document.getElementById('dryRunToggle');
+    const modeLabel = document.getElementById('modeLabel');
+    const statusBadge = document.getElementById('statusBadge');
+
+    dryRunToggle.addEventListener('change', () => {
+      modeLabel.textContent = dryRunToggle.checked ? 'Dry Run' : 'LIVE';
+      modeLabel.style.color = dryRunToggle.checked ? '' : '#e74c3c';
+    });
+
+    startBtn.addEventListener('click', async () => {
+      const dryRun = dryRunToggle.checked;
+      if (!dryRun && !confirm('⚠️ LIVEモードで開始します。実際に注文が実行されます。よろしいですか？')) return;
+      await fetch('/api/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dry_run: dryRun }),
+      });
+    });
+
+    stopBtn.addEventListener('click', async () => {
+      await fetch('/api/stop', { method: 'POST' });
+    });
+
+    function updateUI(data) {
+      // ボタン状態
+      startBtn.disabled = data.running;
+      stopBtn.disabled = !data.running;
+      dryRunToggle.disabled = data.running;
+      if (data.running) {
+        statusBadge.textContent = data.dry_run ? '稼働中 (Dry Run)' : '稼働中 (LIVE)';
+        statusBadge.className = 'badge ' + (data.dry_run ? 'badge-dry' : 'badge-live');
+      } else {
+        statusBadge.textContent = '停止中';
+        statusBadge.className = 'badge badge-stopped';
+      }
+
+      // 指標
+      if (data.summary) {
+        const s = data.summary;
+        document.getElementById('price').textContent = '¥' + Math.round(s.price).toLocaleString();
+        document.getElementById('rsi').textContent = s.rsi.toFixed(1);
+        const rsiEl = document.getElementById('rsi');
+        rsiEl.className = 'card-value' + (s.rsi < 30 ? ' text-green' : s.rsi > 70 ? ' text-red' : '');
+        document.getElementById('macdH').textContent = s.macd_histogram.toFixed(2);
+        const macdEl = document.getElementById('macdH');
+        macdEl.className = 'card-value' + (s.macd_histogram > 0 ? ' text-green' : ' text-red');
+        document.getElementById('bbPos').textContent = s.bb_position.toFixed(3);
+      }
+
+      // AI判断
+      if (data.decision) {
+        const d = data.decision;
+        const actionEl = document.getElementById('decisionAction');
+        actionEl.textContent = d.action;
+        actionEl.className = 'decision-action action-' + d.action.toLowerCase();
+        document.getElementById('decisionConfidence').textContent =
+          '確信度: ' + (d.confidence * 100).toFixed(0) + '%';
+        document.getElementById('decisionReason').textContent = d.reason;
+      }
+
+      // 取引履歴
+      const tbody = document.getElementById('tradeHistory');
+      tbody.innerHTML = data.trade_history.slice().reverse().map(t =>
+        `<tr class="trade-${t.action.toLowerCase()}">
+          <td>${t.time}</td>
+          <td><strong>${t.action}</strong></td>
+          <td>${t.size}</td>
+          <td>¥${t.price.toLocaleString()}</td>
+          <td>${t.reason}</td>
+        </tr>`
+      ).join('');
+
+      // ログ
+      const logArea = document.getElementById('logArea');
+      const wasAtBottom = logArea.scrollTop + logArea.clientHeight >= logArea.scrollHeight - 20;
+      logArea.innerHTML = data.logs.map(l =>
+        `<div class="log-line log-${l.level.toLowerCase()}"><span class="log-time">${l.time}</span> ${l.message}</div>`
+      ).join('');
+      if (wasAtBottom) logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    async function poll() {
+      try {
+        const resp = await fetch('/api/status');
+        if (resp.ok) updateUI(await resp.json());
+      } catch (e) { /* ignore */ }
+    }
+
+    setInterval(poll, 3000);
+    poll();
+  </script>
+</body>
+</html>
