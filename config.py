@@ -10,7 +10,10 @@ BITFLYER_API_SECRET = os.getenv("BITFLYER_API_SECRET", "")
 BITFLYER_BASE_URL = "https://api.bitflyer.com"
 PRODUCT_CODE = "BTC_JPY"
 
-# --- Anthropic API ---
+# --- Claude 分析設定 ---
+# "cli" = Claude Code CLI (サブスク内、APIキー不要)
+# "api" = Anthropic API (従量課金、APIキー必要)
+ANALYZER_MODE = os.getenv("ANALYZER_MODE", "cli")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-6"
 

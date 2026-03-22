@@ -2,7 +2,7 @@
 import logging
 import time
 from bitflyer_client import BitFlyerClient
-from candle_builder import build_candles_from_executions
+from candle_builder import get_candles
 from indicators import build_summary
 from ai_analyzer import analyze
 from risk_manager import RiskManager
@@ -19,10 +19,9 @@ class Trader:
 
     def run_once(self):
         """1回の分析・売買サイクルを実行"""
-        # 1. 約定履歴を取得してローソク足を構築
-        logger.info("約定履歴を取得中...")
-        executions = self.client.get_executions(count=500)
-        candles = build_candles_from_executions(executions, config.CANDLE_PERIOD_SEC)
+        # 1. ローソク足を取得
+        logger.info("ローソク足データを取得中...")
+        candles = get_candles(config.CANDLE_PERIOD_SEC, config.CANDLE_COUNT)
 
         if len(candles) < 30:
             logger.warning("ローソク足データが不足しています (%d本)", len(candles))

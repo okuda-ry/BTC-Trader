@@ -56,13 +56,12 @@ state = {
 # ---- トレーダーを拡張してUI用データを記録 ----
 class WebTrader(Trader):
     def run_once(self):
-        from candle_builder import build_candles_from_executions
+        from candle_builder import get_candles
         from indicators import build_summary
         from ai_analyzer import analyze
 
-        logger.info("約定履歴を取得中...")
-        executions = self.client.get_executions(count=500)
-        candles = build_candles_from_executions(executions, config.CANDLE_PERIOD_SEC)
+        logger.info("ローソク足データを取得中...")
+        candles = get_candles(config.CANDLE_PERIOD_SEC, config.CANDLE_COUNT)
 
         if len(candles) < 30:
             logger.warning("ローソク足データが不足しています (%d本)", len(candles))
