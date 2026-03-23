@@ -14,6 +14,9 @@ venv/
 logs/
 *.log
 
+# Runtime state
+risk_state.json
+
 # IDE
 .vscode/
 .idea/

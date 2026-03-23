@@ -56,67 +56,16 @@ state = {
 # ---- トレーダーを拡張してUI用データを記録 ----
 class WebTrader(Trader):
     def run_once(self):
-        from candle_builder import get_candles
-        from indicators import build_summary
-        from ai_analyzer import analyze
-
-        logger.info("ローソク足データを取得中...")
-        candles = get_candles(config.CANDLE_PERIOD_SEC, config.CANDLE_COUNT)
-
-        if len(candles) < 30:
-            logger.warning("ローソク足データが不足しています (%d本)", len(candles))
-            return
-
-        summary = build_summary(candles)
-        state["last_summary"] = summary
-        logger.info(
-            "価格=¥%s  RSI=%.1f  MACD_H=%.1f  BB_pos=%.3f",
-            f"{summary['price']:,.0f}",
-            summary["rsi"],
-            summary["macd_histogram"],
-            summary["bb_position"],
-        )
-
-        btc_balance = self.client.get_btc_balance() if not self.dry_run else 0.0
-        jpy_balance = self.client.get_jpy_balance() if not self.dry_run else 1_000_000.0
-        current_price = summary["price"]
-
-        if self.risk.entry_price is not None and btc_balance > 0.0001:
-            if self.risk.should_stop_loss(current_price):
-                logger.warning("損切り発動!")
-                self._execute_sell(btc_balance, current_price)
-                _record_trade("SELL", btc_balance, current_price, "損切り")
-                return
-            if self.risk.should_take_profit(current_price):
-                logger.info("利確発動!")
-                self._execute_sell(btc_balance, current_price)
-                _record_trade("SELL", btc_balance, current_price, "利確")
-                return
-
-        logger.info("Claude に分析を依頼中...")
-        decision = analyze(summary, btc_balance)
-        state["last_decision"] = decision
-        logger.info(
-            "AI判断: %s (確信度: %.0f%%) — %s",
-            decision["action"],
-            decision["confidence"] * 100,
-            decision["reason"],
-        )
-
-        if decision["confidence"] < 0.6:
-            logger.info("確信度が低いためスキップ")
-            return
-
-        if decision["action"] == "BUY" and btc_balance < 0.0001:
-            size = self.risk.calc_order_size(jpy_balance, current_price)
-            if size > 0:
-                self._execute_buy(size, current_price)
-                _record_trade("BUY", size, current_price, decision["reason"])
-        elif decision["action"] == "SELL" and btc_balance > 0.0001:
-            self._execute_sell(btc_balance, current_price)
-            _record_trade("SELL", btc_balance, current_price, decision["reason"])
-        else:
-            logger.info("HOLD — 待機")
+        super().run_once()
+        # Trader が保持する最新データを UI 用の state に反映
+        if self.last_summary:
+            state["last_summary"] = self.last_summary
+        if self.last_decision:
+            state["last_decision"] = self.last_decision
+        # 実際に取引が実行された場合のみ記録
+        if self.last_trade:
+            t = self.last_trade
+            _record_trade(t["action"], t["size"], t["price"], t["reason"])
 
 
 def _record_trade(action, size, price, reason):
@@ -135,7 +84,8 @@ def _trading_loop():
     import time
     trader = WebTrader(dry_run=state["dry_run"])
     state["trader"] = trader
-    logger.info("=== トレーディング開始 (dry_run=%s) ===", state["dry_run"])
+    logger.info("=== トレーディング開始 (dry_run=%s, order_type=%s) ===",
+                state["dry_run"], config.ORDER_TYPE)
     while state["running"]:
         try:
             trader.run_once()

@@ -17,7 +17,7 @@ def setup_logging(level: str = "INFO"):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BTC Auto Trader (bitFlyer + Claude AI)")
+    parser = argparse.ArgumentParser(description="BTC Auto Trader (GMOコイン + Claude AI)")
     parser.add_argument(
         "--live",
         action="store_true",
