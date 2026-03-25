@@ -1,0 +1,24 @@
+[Unit]
+Description=Crypto Auto Trader (GMO Coin + Claude AI)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/BTC-Trader
+ExecStart=/home/ubuntu/BTC-Trader/venv/bin/python app.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# 環境変数を .env から読み込む
+EnvironmentFile=/home/ubuntu/BTC-Trader/.env
+
+# セキュリティ
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/BTC-Trader
+
+[Install]
+WantedBy=multi-user.target
