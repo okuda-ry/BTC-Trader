@@ -91,11 +91,15 @@ class CurrencyTrader:
             logger.info("[%s] 確信度が低いためスキップ", self.symbol)
             return
 
-        if decision["action"] == "BUY" and not has_position:
-            size = self.risk.calc_order_size(jpy_balance, current_price)
+        if decision["action"] == "BUY":
+            size = self.risk.calc_order_size(jpy_balance, current_price, balance)
             if size > 0:
+                if has_position:
+                    logger.info("[%s] 目標比率未達のため追加購入 (現保有: %.6f)", self.symbol, balance)
                 self._execute_buy(size, current_price)
                 # 注意: last_trade は約定確認時に設定（_check_pending_order 内）
+            else:
+                logger.info("[%s] 目標比率到達済み — 追加購入不要", self.symbol)
 
         elif decision["action"] == "SELL" and has_position:
             self._execute_sell(balance, current_price)

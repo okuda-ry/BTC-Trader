@@ -63,22 +63,44 @@ class RiskManager:
             data.pop(self.symbol, None)
         _save_all_state(data)
 
-    def calc_order_size(self, jpy_balance: float, price: float) -> float:
-        risk_jpy = jpy_balance * self.max_position_ratio
-        size = risk_jpy / price
+    def calc_order_size(self, jpy_balance: float, price: float,
+                        current_balance: float = 0.0) -> float:
+        """目標ポジション（総資産の max_position_ratio）に対する不足分を計算。
+
+        current_balance が 0 なら新規購入、>0 なら差分の追加購入量を返す。
+        """
+        # 総資産の概算: JPY + 現在の当通貨ポジション評価額
+        position_value = current_balance * price
+        total_assets = jpy_balance + position_value
+        target_jpy = total_assets * self.max_position_ratio
+        gap_jpy = target_jpy - position_value
+
+        from config import MIN_TRADE_JPY
+        if gap_jpy < MIN_TRADE_JPY:
+            return 0.0
+
+        size = gap_jpy / price
         size = round(size, self.size_decimals)
         if size < self.min_order_size:
-            return 0.0
-        from config import MIN_TRADE_JPY
-        if risk_jpy < MIN_TRADE_JPY:
             return 0.0
         return size
 
     def set_entry(self, price: float, size: float = 0.0):
-        self.entry_price = price
-        self.entry_size = size
+        """エントリーを記録。既存ポジションがあれば加重平均で更新。"""
+        if self.entry_price is not None and self.entry_size > 0 and size > 0:
+            # 加重平均取得単価
+            total_cost = self.entry_price * self.entry_size + price * size
+            total_size = self.entry_size + size
+            self.entry_price = total_cost / total_size
+            self.entry_size = total_size
+            logger.info("[%s] 追加購入 → 平均取得単価: ¥%s (合計: %.6f)",
+                        self.symbol, f"{self.entry_price:,.0f}", self.entry_size)
+        else:
+            self.entry_price = price
+            self.entry_size = size
+            logger.info("[%s] エントリー記録: ¥%s (%.6f)",
+                        self.symbol, f"{price:,.0f}", size)
         self._save_state()
-        logger.info("[%s] エントリー記録: ¥%s", self.symbol, f"{price:,.0f}")
 
     def clear_entry(self):
         self.entry_price = None
