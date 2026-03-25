@@ -1,4 +1,5 @@
 """トレーディング設定"""
+import json
 import os
 from dotenv import load_dotenv
 
@@ -7,11 +8,8 @@ load_dotenv()
 # --- GMOコイン API ---
 GMO_API_KEY = os.getenv("GMO_API_KEY", "")
 GMO_API_SECRET = os.getenv("GMO_API_SECRET", "")
-PRODUCT_CODE = "BTC"  # GMOコイン現物取引のシンボル
 
 # --- Claude 分析設定 ---
-# "cli" = Claude Code CLI (サブスク内、APIキー不要)
-# "api" = Anthropic API (従量課金、APIキー必要)
 ANALYZER_MODE = os.getenv("ANALYZER_MODE", "cli")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-6"
@@ -25,15 +23,20 @@ BB_PERIOD = 20
 BB_STD = 2
 
 # --- 取引ルール ---
-TRADE_INTERVAL_SEC = 900        # 15分間隔でチェック
-CANDLE_PERIOD_SEC = 3600        # 1時間足
-CANDLE_COUNT = 100              # 分析に使うローソク足の本数
-ORDER_TYPE = "LIMIT"            # LIMIT (指値) or MARKET (成行)
-LIMIT_OFFSET_PCT = 0.05         # 指値のオフセット (現在価格から±0.05%)
-ORDER_TIMEOUT_SEC = 300         # 指値が約定しなかった場合のキャンセル待ち時間 (5分)
+TRADE_INTERVAL_SEC = 900
+CANDLE_PERIOD_SEC = 3600
+CANDLE_COUNT = 100
+ORDER_TYPE = "LIMIT"
+LIMIT_OFFSET_PCT = 0.05
+MIN_TRADE_JPY = 1000
 
-# --- リスク管理 ---
-MAX_POSITION_RATIO = 0.10       # 残高の最大10%をリスクにさらす
-STOP_LOSS_PCT = 0.02            # 2% 損切り
-TAKE_PROFIT_PCT = 0.04          # 4% 利確
-MIN_TRADE_JPY = 1000            # 最小取引額(JPY)
+# --- 通貨設定の読み込み ---
+_CURRENCIES_FILE = os.path.join(os.path.dirname(__file__), "currencies.json")
+
+def load_currencies() -> dict:
+    with open(_CURRENCIES_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def get_enabled_symbols() -> list[str]:
+    currencies = load_currencies()
+    return [sym for sym, cfg in currencies.items() if cfg.get("enabled")]

@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BTC Auto Trader</title>
+  <title>Crypto Auto Trader</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <header>
-    <h1>BTC Auto Trader</h1>
+    <h1>Crypto Auto Trader</h1>
     <div class="controls">
       <label class="switch">
         <input type="checkbox" id="dryRunToggle" checked>
@@ -22,64 +22,92 @@
   </header>
 
   <main>
-    <!-- 価格・指標カード -->
-    <section class="cards">
-      <div class="card">
-        <div class="card-label">BTC/JPY</div>
-        <div class="card-value" id="price">---</div>
-      </div>
-      <div class="card">
-        <div class="card-label">RSI (14)</div>
-        <div class="card-value" id="rsi">---</div>
-      </div>
-      <div class="card">
-        <div class="card-label">MACD Histogram</div>
-        <div class="card-value" id="macdH">---</div>
-      </div>
-      <div class="card">
-        <div class="card-label">BB Position</div>
-        <div class="card-value" id="bbPos">---</div>
-      </div>
-    </section>
+    <!-- 通貨タブ -->
+    <nav class="currency-tabs" id="currencyTabs">
+      {% for symbol, cfg in currencies.items() %}
+      <button class="tab {% if loop.first %}active{% endif %}" data-symbol="{{ symbol }}">
+        <span class="tab-symbol">{{ symbol }}</span>
+        <span class="tab-price" id="tabPrice_{{ symbol }}">---</span>
+        <span class="tab-position" id="tabPos_{{ symbol }}"></span>
+      </button>
+      {% endfor %}
+    </nav>
 
-    <!-- AI判断 -->
-    <section class="decision-box" id="decisionBox">
-      <h2>AI 判断</h2>
-      <div class="decision-content">
-        <span class="decision-action" id="decisionAction">---</span>
-        <span class="decision-confidence" id="decisionConfidence"></span>
-        <p class="decision-reason" id="decisionReason"></p>
-      </div>
-    </section>
-
-    <div class="bottom-panels">
-      <!-- 取引履歴 -->
-      <section class="panel">
-        <h2>取引履歴</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>時刻</th><th>売買</th><th>数量</th><th>価格</th><th>理由</th></tr>
-            </thead>
-            <tbody id="tradeHistory"></tbody>
-          </table>
+    <!-- 選択中の通貨の詳細 -->
+    <div id="currencyDetail">
+      <section class="cards">
+        <div class="card">
+          <div class="card-label" id="priceLabel">価格</div>
+          <div class="card-value" id="price">---</div>
+        </div>
+        <div class="card">
+          <div class="card-label">RSI (14)</div>
+          <div class="card-value" id="rsi">---</div>
+        </div>
+        <div class="card">
+          <div class="card-label">MACD Histogram</div>
+          <div class="card-value" id="macdH">---</div>
+        </div>
+        <div class="card">
+          <div class="card-label">BB Position</div>
+          <div class="card-value" id="bbPos">---</div>
         </div>
       </section>
 
-      <!-- ログ -->
-      <section class="panel">
-        <h2>ログ</h2>
-        <div class="log-area" id="logArea"></div>
+      <!-- ポジション情報 -->
+      <section class="position-box" id="positionBox">
+        <span class="position-label">ポジション:</span>
+        <span id="positionInfo">なし</span>
       </section>
+
+      <!-- AI判断 -->
+      <section class="decision-box">
+        <h2>AI 判断</h2>
+        <div class="decision-content">
+          <span class="decision-action" id="decisionAction">---</span>
+          <span class="decision-confidence" id="decisionConfidence"></span>
+          <p class="decision-reason" id="decisionReason"></p>
+        </div>
+      </section>
+
+      <div class="bottom-panels">
+        <section class="panel">
+          <h2>取引履歴</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>時刻</th><th>売買</th><th>数量</th><th>価格</th><th>理由</th></tr>
+              </thead>
+              <tbody id="tradeHistory"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>ログ</h2>
+          <div class="log-area" id="logArea"></div>
+        </section>
+      </div>
     </div>
   </main>
 
   <script>
+    let activeSymbol = '{{ currencies.keys()|first }}';
+
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const dryRunToggle = document.getElementById('dryRunToggle');
     const modeLabel = document.getElementById('modeLabel');
     const statusBadge = document.getElementById('statusBadge');
+
+    // タブ切り替え
+    document.getElementById('currencyTabs').addEventListener('click', e => {
+      const tab = e.target.closest('.tab');
+      if (!tab) return;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      activeSymbol = tab.dataset.symbol;
+    });
 
     dryRunToggle.addEventListener('change', () => {
       modeLabel.textContent = dryRunToggle.checked ? 'Dry Run' : 'LIVE';
@@ -113,33 +141,70 @@
         statusBadge.className = 'badge badge-stopped';
       }
 
-      // 指標
-      if (data.summary) {
-        const s = data.summary;
+      const currencies = data.currencies || {};
+
+      // タブの価格・ポジション更新
+      for (const [sym, info] of Object.entries(currencies)) {
+        const priceEl = document.getElementById('tabPrice_' + sym);
+        const posEl = document.getElementById('tabPos_' + sym);
+        if (priceEl && info.summary) {
+          priceEl.textContent = '¥' + Math.round(info.summary.price).toLocaleString();
+        }
+        if (posEl) {
+          if (info.entry_price) {
+            posEl.textContent = '●';
+            posEl.className = 'tab-position has-position';
+          } else {
+            posEl.textContent = '';
+            posEl.className = 'tab-position';
+          }
+        }
+      }
+
+      // 選択中の通貨の詳細
+      const cur = currencies[activeSymbol];
+      if (!cur) return;
+
+      document.getElementById('priceLabel').textContent = activeSymbol + '/JPY';
+
+      if (cur.summary) {
+        const s = cur.summary;
         document.getElementById('price').textContent = '¥' + Math.round(s.price).toLocaleString();
-        document.getElementById('rsi').textContent = s.rsi.toFixed(1);
         const rsiEl = document.getElementById('rsi');
+        rsiEl.textContent = s.rsi.toFixed(1);
         rsiEl.className = 'card-value' + (s.rsi < 30 ? ' text-green' : s.rsi > 70 ? ' text-red' : '');
-        document.getElementById('macdH').textContent = s.macd_histogram.toFixed(2);
         const macdEl = document.getElementById('macdH');
+        macdEl.textContent = s.macd_histogram.toFixed(2);
         macdEl.className = 'card-value' + (s.macd_histogram > 0 ? ' text-green' : ' text-red');
         document.getElementById('bbPos').textContent = s.bb_position.toFixed(3);
       }
 
+      // ポジション情報
+      const posInfo = document.getElementById('positionInfo');
+      if (cur.entry_price && cur.entry_size > 0) {
+        const pnl = cur.summary ? ((cur.summary.price - cur.entry_price) / cur.entry_price * 100).toFixed(2) : '---';
+        posInfo.innerHTML = `${cur.entry_size} ${activeSymbol} @ ¥${Math.round(cur.entry_price).toLocaleString()} <span class="${parseFloat(pnl) >= 0 ? 'text-green' : 'text-red'}">(${pnl}%)</span>`;
+      } else {
+        posInfo.textContent = 'なし';
+      }
+
       // AI判断
-      if (data.decision) {
-        const d = data.decision;
+      if (cur.decision) {
+        const d = cur.decision;
         const actionEl = document.getElementById('decisionAction');
         actionEl.textContent = d.action;
         actionEl.className = 'decision-action action-' + d.action.toLowerCase();
-        document.getElementById('decisionConfidence').textContent =
-          '確信度: ' + (d.confidence * 100).toFixed(0) + '%';
+        document.getElementById('decisionConfidence').textContent = '確信度: ' + (d.confidence * 100).toFixed(0) + '%';
         document.getElementById('decisionReason').textContent = d.reason;
+      } else {
+        document.getElementById('decisionAction').textContent = '---';
+        document.getElementById('decisionConfidence').textContent = '';
+        document.getElementById('decisionReason').textContent = '';
       }
 
       // 取引履歴
-      const tbody = document.getElementById('tradeHistory');
-      tbody.innerHTML = data.trade_history.slice().reverse().map(t =>
+      const history = cur.trade_history || [];
+      document.getElementById('tradeHistory').innerHTML = history.slice().reverse().map(t =>
         `<tr class="trade-${t.action.toLowerCase()}">
           <td>${t.time}</td>
           <td><strong>${t.action}</strong></td>

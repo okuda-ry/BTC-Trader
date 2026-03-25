@@ -1,6 +1,5 @@
-"""メインのトレーディングロジック"""
+"""通貨ごとのトレーディングロジック"""
 import logging
-import time
 from gmo_client import GMOClient
 from candle_builder import get_candles
 from indicators import build_summary
@@ -11,196 +10,255 @@ import config
 logger = logging.getLogger(__name__)
 
 
-class Trader:
-    def __init__(self, dry_run: bool = True):
-        self.client = GMOClient()
-        self.risk = RiskManager()
+class CurrencyTrader:
+    """1つの通貨ペアを担当するトレーダー"""
+
+    def __init__(self, symbol: str, currency_config: dict, client: GMOClient, dry_run: bool = True):
+        self.symbol = symbol
+        self.currency_config = currency_config
+        self.client = client
+        self.risk = RiskManager(symbol, currency_config)
         self.dry_run = dry_run
         self._pending_order_id: str | None = None
-        # UI等から参照できるように最新データを保持
+        self._pending_side: str | None = None
+        self._pending_check_failures: int = 0
+
+        # UI 用
         self.last_summary: dict | None = None
         self.last_decision: dict | None = None
-        self.last_trade: dict | None = None  # 直近の取引 {"action", "size", "price", "reason"}
+        self.last_trade: dict | None = None  # 約定確認済みの取引のみ
 
-    def run_once(self):
-        """1回の分析・売買サイクルを実行"""
-        self.last_trade = None  # 毎サイクルリセット
+    def run_once(self, other_summaries: dict | None = None, prefetched_summary: dict | None = None):
+        """1回の分析・売買サイクル"""
+        self.last_trade = None
 
-        # 0. 未約定の指値注文があればチェック
-        self._check_pending_order()
+        # 0. 未約定の指値注文があれば処理して、このサイクルはスキップ
+        if self._pending_order_id is not None:
+            self._check_pending_order()
+            return  # 注文処理後は次のサイクルまで待つ
 
-        # 1. ローソク足を取得
-        logger.info("ローソク足データを取得中...")
-        candles = get_candles(config.CANDLE_PERIOD_SEC, config.CANDLE_COUNT)
-
-        if len(candles) < 30:
-            logger.warning("ローソク足データが不足しています (%d本)", len(candles))
-            return
-
-        # 2. テクニカル指標を計算
-        summary = build_summary(candles)
+        # 1-2. テクニカル指標（事前取得済みならスキップ）
+        if prefetched_summary is not None:
+            summary = prefetched_summary
+        else:
+            logger.info("[%s] ローソク足データを取得中...", self.symbol)
+            candles = get_candles(self.symbol, config.CANDLE_PERIOD_SEC, config.CANDLE_COUNT)
+            if len(candles) < 30:
+                logger.warning("[%s] ローソク足データが不足 (%d本)", self.symbol, len(candles))
+                return
+            summary = build_summary(candles)
         self.last_summary = summary
-        logger.info(
-            "価格=¥%s  RSI=%.1f  MACD_H=%.1f  BB_pos=%.3f",
-            f"{summary['price']:,.0f}",
-            summary["rsi"],
-            summary["macd_histogram"],
-            summary["bb_position"],
-        )
+        logger.info("[%s] 価格=¥%s RSI=%.1f MACD_H=%.1f BB=%.3f",
+                    self.symbol, f"{summary['price']:,.0f}",
+                    summary["rsi"], summary["macd_histogram"], summary["bb_position"])
 
-        # 3. 現在の残高を確認
-        btc_balance = self.client.get_btc_balance() if not self.dry_run else 0.0
+        # 3. 残高確認（実際の取引所残高で判定）
+        balance = self.client.get_balance(self.symbol) if not self.dry_run else 0.0
         jpy_balance = self.client.get_jpy_balance() if not self.dry_run else 1_000_000.0
         current_price = summary["price"]
+        min_size = self.currency_config["min_order_size"]
+        has_position = balance >= min_size
 
         # 4. 損切り・利確チェック（ポジション保有時）
-        if self.risk.entry_price is not None and btc_balance > 0.00001:
+        if has_position and self.risk.entry_price is not None:
             if self.risk.should_stop_loss(current_price):
-                logger.warning("損切り発動! entry=¥%s → now=¥%s",
-                               f"{self.risk.entry_price:,.0f}", f"{current_price:,.0f}")
-                self._execute_sell(btc_balance, current_price, force_market=True)
-                self.last_trade = {"action": "SELL", "size": btc_balance, "price": current_price, "reason": "損切り"}
+                logger.warning("[%s] 損切り発動! entry=¥%s → now=¥%s",
+                               self.symbol, f"{self.risk.entry_price:,.0f}", f"{current_price:,.0f}")
+                self._execute_sell(balance, current_price, force_market=True)
                 return
             if self.risk.should_take_profit(current_price):
-                logger.info("利確発動! entry=¥%s → now=¥%s",
-                            f"{self.risk.entry_price:,.0f}", f"{current_price:,.0f}")
-                self._execute_sell(btc_balance, current_price)
-                self.last_trade = {"action": "SELL", "size": btc_balance, "price": current_price, "reason": "利確"}
+                logger.info("[%s] 利確発動! entry=¥%s → now=¥%s",
+                            self.symbol, f"{self.risk.entry_price:,.0f}", f"{current_price:,.0f}")
+                self._execute_sell(balance, current_price)
                 return
 
-        # 5. AI に売買判断を聞く
-        logger.info("Claude に分析を依頼中...")
-        decision = analyze(summary, btc_balance)
-        self.last_decision = decision
-        logger.info(
-            "AI判断: %s (確信度: %.0f%%) — %s",
-            decision["action"],
-            decision["confidence"] * 100,
-            decision["reason"],
-        )
+        # 4b. エントリー価格が不明だが残高がある場合（再起動後や部分約定後）
+        if has_position and self.risk.entry_price is None:
+            logger.warning("[%s] ポジションあり (%.6f) だがエントリー価格不明。現在価格で記録します",
+                           self.symbol, balance)
+            self.risk.set_entry(current_price, balance)
 
-        # 6. 判断に基づいて売買実行
+        # 5. AI 分析
+        logger.info("[%s] Claude に分析を依頼中...", self.symbol)
+        decision = analyze(self.symbol, summary, balance, other_summaries)
+        self.last_decision = decision
+        logger.info("[%s] AI判断: %s (確信度: %.0f%%) — %s",
+                    self.symbol, decision["action"],
+                    decision["confidence"] * 100, decision["reason"])
+
+        # 6. 売買実行
         if decision["confidence"] < 0.6:
-            logger.info("確信度が低いためスキップ")
+            logger.info("[%s] 確信度が低いためスキップ", self.symbol)
             return
 
-        if decision["action"] == "BUY" and btc_balance < 0.00001:
+        if decision["action"] == "BUY" and not has_position:
             size = self.risk.calc_order_size(jpy_balance, current_price)
             if size > 0:
                 self._execute_buy(size, current_price)
-                self.last_trade = {"action": "BUY", "size": size, "price": current_price, "reason": decision["reason"]}
+                # 注意: last_trade は約定確認時に設定（_check_pending_order 内）
 
-        elif decision["action"] == "SELL" and btc_balance > 0.00001:
-            self._execute_sell(btc_balance, current_price)
-            self.last_trade = {"action": "SELL", "size": btc_balance, "price": current_price, "reason": decision["reason"]}
+        elif decision["action"] == "SELL" and has_position:
+            self._execute_sell(balance, current_price)
 
         else:
-            logger.info("HOLD — 待機")
+            logger.info("[%s] HOLD — 待機", self.symbol)
 
     def _calc_limit_price(self, side: str, market_price: float) -> int:
-        """指値価格を計算する。Maker になるようにオフセットを付ける。"""
         offset = market_price * config.LIMIT_OFFSET_PCT / 100
         if side == "BUY":
-            # 現在価格より少し下に買い指値
             return int(market_price - offset)
         else:
-            # 現在価格より少し上に売り指値
             return int(market_price + offset)
 
     def _execute_buy(self, size: float, price: float):
         order_type = config.ORDER_TYPE
         limit_price = self._calc_limit_price("BUY", price) if order_type == "LIMIT" else None
+        decimals = self.currency_config["size_decimals"]
 
-        if order_type == "LIMIT":
-            logger.info("BUY %.5f BTC @ 指値 ¥%s (市場: ¥%s)",
-                        size, f"{limit_price:,}", f"{price:,.0f}")
-        else:
-            logger.info("BUY %.5f BTC @ 成行 ¥%s", size, f"{price:,.0f}")
+        logger.info("[%s] BUY %s @ %s ¥%s",
+                    self.symbol, f"{size:.{decimals}f}",
+                    "指値" if order_type == "LIMIT" else "成行",
+                    f"{(limit_price or price):,}")
 
         if not self.dry_run:
-            result = self.client.send_order("BUY", size, order_type, limit_price)
+            result = self.client.send_order(
+                self.symbol, "BUY", size, order_type, limit_price, decimals)
             order_id = result.get("data")
-            if order_type == "LIMIT" and order_id:
-                self._pending_order_id = str(order_id)
-                logger.info("指値注文送信: orderId=%s", order_id)
+            if order_type == "LIMIT":
+                if order_id:
+                    self._pending_order_id = str(order_id)
+                    self._pending_side = "BUY"
+                    logger.info("[%s] 指値注文送信: orderId=%s (次のサイクルで確認)", self.symbol, order_id)
+                else:
+                    logger.warning("[%s] 指値注文のorder_idが取得できませんでした", self.symbol)
             else:
-                # 成行なら即約定
-                self.risk.set_entry(price)
+                # 成行なら即約定とみなす
+                self.risk.set_entry(price, size)
+                self.last_trade = {"action": "BUY", "size": size, "price": price, "reason": "成行約定"}
         else:
-            logger.info("[DRY RUN] 注文はスキップ")
-            self.risk.set_entry(price)
+            logger.info("[%s] [DRY RUN] 注文スキップ", self.symbol)
+            self.risk.set_entry(price, size)
+            self.last_trade = {"action": "BUY", "size": size, "price": price, "reason": "DRY RUN"}
 
     def _execute_sell(self, size: float, price: float, force_market: bool = False):
         order_type = "MARKET" if force_market else config.ORDER_TYPE
         limit_price = self._calc_limit_price("SELL", price) if order_type == "LIMIT" else None
+        decimals = self.currency_config["size_decimals"]
 
-        if order_type == "LIMIT":
-            logger.info("SELL %.5f BTC @ 指値 ¥%s (市場: ¥%s)",
-                        size, f"{limit_price:,}", f"{price:,.0f}")
-        else:
-            logger.info("SELL %.5f BTC @ 成行 ¥%s", size, f"{price:,.0f}")
+        logger.info("[%s] SELL %s @ %s ¥%s",
+                    self.symbol, f"{size:.{decimals}f}",
+                    "指値" if order_type == "LIMIT" else "成行",
+                    f"{(limit_price or price):,}")
 
         if not self.dry_run:
-            result = self.client.send_order("SELL", size, order_type, limit_price)
+            result = self.client.send_order(
+                self.symbol, "SELL", size, order_type, limit_price, decimals)
             order_id = result.get("data")
-            if order_type == "LIMIT" and order_id:
-                self._pending_order_id = str(order_id)
-                logger.info("指値注文送信: orderId=%s", order_id)
+            if order_type == "LIMIT":
+                if order_id:
+                    self._pending_order_id = str(order_id)
+                    self._pending_side = "SELL"
+                    logger.info("[%s] 指値注文送信: orderId=%s (次のサイクルで確認)", self.symbol, order_id)
+                else:
+                    logger.warning("[%s] 指値注文のorder_idが取得できませんでした", self.symbol)
             else:
+                # 成行なら即約定
                 self.risk.clear_entry()
+                self.last_trade = {"action": "SELL", "size": size, "price": price, "reason": "成行約定"}
         else:
-            logger.info("[DRY RUN] 注文はスキップ")
+            logger.info("[%s] [DRY RUN] 注文スキップ", self.symbol)
             self.risk.clear_entry()
+            self.last_trade = {"action": "SELL", "size": size, "price": price, "reason": "DRY RUN"}
 
     def _check_pending_order(self):
-        """未約定の指値注文があれば状態を確認し、必要ならキャンセル"""
+        """未約定注文の状態確認。約定時のみ取引を記録。"""
         if self._pending_order_id is None:
             return
+
         if self.dry_run:
             self._pending_order_id = None
+            self._pending_side = None
             return
 
         try:
             order = self.client.get_order_status(self._pending_order_id)
             if not order:
-                logger.warning("注文情報が取得できません: %s", self._pending_order_id)
+                logger.warning("[%s] 注文情報取得不可: %s", self.symbol, self._pending_order_id)
                 self._pending_order_id = None
+                self._pending_side = None
                 return
 
             status = order.get("status", "")
-            side = order.get("side", "")
-            logger.info("注文 %s 状態: %s", self._pending_order_id, status)
+            side = order.get("side", self._pending_side or "")
+            executed_size = float(order.get("executedSize", "0"))
+            order_price = float(order.get("price", "0"))
+
+            logger.info("[%s] 注文 %s: status=%s, side=%s, 約定=%s",
+                        self.symbol, self._pending_order_id, status, side, executed_size)
 
             if status == "EXECUTED":
-                logger.info("指値注文が約定しました: %s %s", side, self._pending_order_id)
-                exec_price = float(order.get("price", 0))
+                # 全量約定 — 取引を記録
+                logger.info("[%s] 指値注文が全量約定! %s %.6f @ ¥%s",
+                            self.symbol, side, executed_size, f"{order_price:,.0f}")
                 if side == "BUY":
-                    self.risk.set_entry(exec_price)
+                    self.risk.set_entry(order_price, executed_size)
+                    self.last_trade = {"action": "BUY", "size": executed_size,
+                                       "price": order_price, "reason": "指値約定"}
                 else:
                     self.risk.clear_entry()
-                self._pending_order_id = None
+                    self.last_trade = {"action": "SELL", "size": executed_size,
+                                       "price": order_price, "reason": "指値約定"}
 
             elif status in ("CANCELED", "EXPIRED"):
-                logger.info("指値注文がキャンセル/期限切れ: %s", self._pending_order_id)
-                self._pending_order_id = None
+                if executed_size > 0:
+                    # 部分約定あり
+                    logger.info("[%s] 部分約定: %s %.6f @ ¥%s",
+                                self.symbol, side, executed_size, f"{order_price:,.0f}")
+                    if side == "BUY":
+                        self.risk.set_entry(order_price, executed_size)
+                        self.last_trade = {"action": "BUY", "size": executed_size,
+                                           "price": order_price, "reason": "部分約定"}
+                    else:
+                        # SELL部分約定: 残りのポジションを更新
+                        remaining = self.risk.entry_size - executed_size
+                        if remaining >= self.currency_config["min_order_size"]:
+                            self.risk.entry_size = remaining
+                            self.risk._save_state()
+                            logger.info("[%s] SELL部分約定: 残ポジション %.6f", self.symbol, remaining)
+                        else:
+                            self.risk.clear_entry()
+                        self.last_trade = {"action": "SELL", "size": executed_size,
+                                           "price": order_price, "reason": "部分約定"}
+                else:
+                    logger.info("[%s] 注文キャンセル/期限切れ（約定なし）", self.symbol)
 
             elif status in ("WAITING", "ORDERED"):
-                # まだ約定していない → キャンセルして次のサイクルに進む
-                logger.info("指値注文が未約定のためキャンセルします: %s", self._pending_order_id)
+                # 未約定 → キャンセル
+                logger.info("[%s] 未約定のためキャンセル: %s", self.symbol, self._pending_order_id)
                 self.client.cancel_order(int(self._pending_order_id))
-                self._pending_order_id = None
+                if executed_size > 0:
+                    logger.info("[%s] キャンセル前に部分約定: %s %.6f",
+                                self.symbol, side, executed_size)
+                    if side == "BUY":
+                        self.risk.set_entry(order_price, executed_size)
+                        self.last_trade = {"action": "BUY", "size": executed_size,
+                                           "price": order_price, "reason": "部分約定(残キャンセル)"}
+
+            self._pending_order_id = None
+            self._pending_side = None
+            self._pending_check_failures = 0
 
         except Exception as e:
-            logger.warning("注文状態の確認でエラー: %s", e)
-            self._pending_order_id = None
-
-    def run_loop(self):
-        """定期的にrun_onceを実行するループ"""
-        logger.info("=== BTC Trader 開始 (dry_run=%s) ===", self.dry_run)
-        while True:
-            try:
-                self.run_once()
-            except Exception:
-                logger.exception("エラーが発生しました")
-            logger.info("次のチェックまで %d 秒待機...", config.TRADE_INTERVAL_SEC)
-            time.sleep(config.TRADE_INTERVAL_SEC)
+            self._pending_check_failures += 1
+            logger.warning("[%s] 注文状態確認エラー (%d回目): %s",
+                           self.symbol, self._pending_check_failures, e)
+            if self._pending_check_failures >= 3:
+                logger.error("[%s] 3回連続失敗。注文 %s をキャンセル試行後クリア",
+                             self.symbol, self._pending_order_id)
+                try:
+                    self.client.cancel_order(int(self._pending_order_id))
+                except Exception:
+                    pass
+                self._pending_order_id = None
+                self._pending_side = None
+                self._pending_check_failures = 0

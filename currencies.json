@@ -1,0 +1,38 @@
+{
+  "BTC": {
+    "enabled": true,
+    "name": "ビットコイン",
+    "min_order_size": 0.00001,
+    "size_decimals": 5,
+    "max_position_ratio": 0.10,
+    "stop_loss_pct": 0.02,
+    "take_profit_pct": 0.04
+  },
+  "ETH": {
+    "enabled": true,
+    "name": "イーサリアム",
+    "min_order_size": 0.001,
+    "size_decimals": 4,
+    "max_position_ratio": 0.10,
+    "stop_loss_pct": 0.03,
+    "take_profit_pct": 0.05
+  },
+  "XRP": {
+    "enabled": true,
+    "name": "リップル",
+    "min_order_size": 1,
+    "size_decimals": 0,
+    "max_position_ratio": 0.10,
+    "stop_loss_pct": 0.03,
+    "take_profit_pct": 0.06
+  },
+  "SOL": {
+    "enabled": true,
+    "name": "ソラナ",
+    "min_order_size": 0.01,
+    "size_decimals": 2,
+    "max_position_ratio": 0.10,
+    "stop_loss_pct": 0.03,
+    "take_profit_pct": 0.06
+  }
+}

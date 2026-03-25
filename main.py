@@ -1,8 +1,8 @@
-"""BTC自動売買 エントリーポイント"""
+"""暗号資産自動売買 エントリーポイント"""
 import argparse
 import logging
 import sys
-from trader import Trader
+from trade_manager import TradeManager
 
 
 def setup_logging(level: str = "INFO"):
@@ -17,31 +17,19 @@ def setup_logging(level: str = "INFO"):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BTC Auto Trader (GMOコイン + Claude AI)")
-    parser.add_argument(
-        "--live",
-        action="store_true",
-        help="実際に注文を出す（デフォルトはdry run）",
-    )
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="1回だけ実行して終了",
-    )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING"],
-    )
+    parser = argparse.ArgumentParser(description="Crypto Auto Trader (GMOコイン + Claude AI)")
+    parser.add_argument("--live", action="store_true", help="実際に注文を出す")
+    parser.add_argument("--once", action="store_true", help="1回だけ実行して終了")
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"])
     args = parser.parse_args()
 
     setup_logging(args.log_level)
-    trader = Trader(dry_run=not args.live)
+    manager = TradeManager(dry_run=not args.live)
 
     if args.once:
-        trader.run_once()
+        manager.run_once()
     else:
-        trader.run_loop()
+        manager.run_loop()
 
 
 if __name__ == "__main__":
