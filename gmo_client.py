@@ -100,7 +100,7 @@ class GMOClient:
             "symbol": symbol,
             "side": side,
             "executionType": order_type,
-            "size": str(round(size, size_decimals)),
+            "size": str(int(size)) if size_decimals == 0 else str(round(size, size_decimals)),
         }
         if order_type == "LIMIT" and price is not None:
             body_dict["price"] = str(int(price))
