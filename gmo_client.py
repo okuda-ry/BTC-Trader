@@ -137,6 +137,62 @@ class GMOClient:
             return data["data"]["list"][0]
         return {}
 
+    def get_executions(self, symbol: str, count: int = 100) -> list:
+        """約定履歴を取得（新しい順）"""
+        path = "/v1/latestExecutions"
+        resp = requests.get(
+            PRIVATE_URL + path,
+            headers=self._headers("GET", path),
+            params={"symbol": symbol, "count": count},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data["status"] != 0:
+            raise RuntimeError(f"GMO executions エラー: {data}")
+        return data.get("data", {}).get("list", [])
+
+    def calc_average_buy_price(self, symbol: str) -> float | None:
+        """約定履歴から現在保有分の平均取得単価を算出する。
+
+        最新の約定から遡り、BUYを積み上げ・SELLを差し引いて
+        現在の保有量に対応する加重平均価格を返す。
+        """
+        try:
+            executions = self.get_executions(symbol)
+        except Exception as e:
+            logger.warning("[%s] 約定履歴取得失敗: %s", symbol, e)
+            return None
+
+        if not executions:
+            return None
+
+        # 古い順に並べ替え
+        executions.sort(key=lambda x: x.get("executionId", 0))
+
+        total_size = 0.0
+        total_cost = 0.0
+
+        for ex in executions:
+            side = ex.get("side", "")
+            size = float(ex.get("size", 0))
+            price = float(ex.get("price", 0))
+
+            if side == "BUY":
+                total_cost += price * size
+                total_size += size
+            elif side == "SELL":
+                if total_size > 0:
+                    # 売却分のコストを按分で差し引く
+                    avg = total_cost / total_size if total_size > 0 else 0
+                    sell_size = min(size, total_size)
+                    total_cost -= avg * sell_size
+                    total_size -= sell_size
+
+        if total_size > 0:
+            return round(total_cost / total_size, 0)
+        return None
+
     def cancel_order(self, order_id: int) -> dict:
         path = "/v1/cancelOrder"
         body = json.dumps({"orderId": order_id})

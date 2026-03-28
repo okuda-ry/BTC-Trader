@@ -53,9 +53,14 @@ class CurrencyTrader:
                     self.symbol, f"{summary['price']:,.0f}",
                     summary["rsi"], summary["macd_histogram"], summary["bb_position"])
 
-        # 3. 残高確認（実際の取引所残高で判定）
-        balance = self.client.get_balance(self.symbol) if not self.dry_run else 0.0
-        jpy_balance = self.client.get_jpy_balance() if not self.dry_run else 1_000_000.0
+        # 3. 残高確認（Dry Runでも実際の残高を表示に使う）
+        try:
+            balance = self.client.get_balance(self.symbol)
+            jpy_balance = self.client.get_jpy_balance()
+        except Exception as e:
+            logger.warning("[%s] 残高取得失敗: %s", self.symbol, e)
+            balance = 0.0
+            jpy_balance = 1_000_000.0 if self.dry_run else 0.0
         current_price = summary["price"]
         min_size = self.currency_config["min_order_size"]
         has_position = balance >= min_size
@@ -75,9 +80,15 @@ class CurrencyTrader:
 
         # 4b. エントリー価格が不明だが残高がある場合（再起動後や部分約定後）
         if has_position and self.risk.entry_price is None:
-            logger.warning("[%s] ポジションあり (%.6f) だがエントリー価格不明。現在価格で記録します",
-                           self.symbol, balance)
-            self.risk.set_entry(current_price, balance)
+            avg_price = self.client.calc_average_buy_price(self.symbol)
+            if avg_price:
+                logger.info("[%s] 約定履歴から平均取得単価を算出: ¥%s (保有: %.6f)",
+                            self.symbol, f"{avg_price:,.0f}", balance)
+                self.risk.set_entry(avg_price, balance)
+            else:
+                logger.warning("[%s] 約定履歴なし。現在価格 ¥%s で記録します (保有: %.6f)",
+                               self.symbol, f"{current_price:,.0f}", balance)
+                self.risk.set_entry(current_price, balance)
 
         # 5. AI 分析
         logger.info("[%s] Claude に分析を依頼中...", self.symbol)
