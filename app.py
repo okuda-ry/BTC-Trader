@@ -1,5 +1,6 @@
 """Flask ウェブアプリケーション（マルチ通貨対応）"""
 import logging
+import logging.handlers
 import threading
 import sys
 from datetime import datetime
@@ -29,12 +30,15 @@ class LogBuffer(logging.Handler):
 log_buffer = LogBuffer()
 log_buffer.setFormatter(logging.Formatter("%(name)s: %(message)s"))
 
+file_handler = logging.handlers.RotatingFileHandler(
+    "trader.log", encoding="utf-8", maxBytes=5 * 1024 * 1024, backupCount=3
+)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("trader.log", encoding="utf-8"),
+        file_handler,
         log_buffer,
     ],
 )

@@ -36,6 +36,19 @@ def init_db():
     conn.commit()
     conn.close()
     logger.info("データベース初期化完了: %s", DB_FILE)
+    cleanup_old_trades()
+
+
+def cleanup_old_trades(days: int = 90):
+    """指定日数より古い取引履歴を削除する。"""
+    conn = _connect()
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    result = conn.execute("DELETE FROM trades WHERE timestamp < ?", (cutoff,))
+    deleted = result.rowcount
+    conn.commit()
+    conn.close()
+    if deleted > 0:
+        logger.info("古い取引履歴を %d 件削除しました（%s 以前）", deleted, cutoff)
 
 
 def record_trade(symbol: str, action: str, size: float, price: float,
