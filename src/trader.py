@@ -256,9 +256,7 @@ class CurrencyTrader:
                         entry_px = self.risk.entry_price
                         remaining = self.risk.entry_size - executed_size
                         if remaining >= self.currency_config["min_order_size"]:
-                            self.risk.entry_size = remaining
-                            self.risk._save_state()
-                            logger.info("[%s] SELL部分約定: 残ポジション %.6f", self.symbol, remaining)
+                            self.risk.reduce_size(executed_size)
                         else:
                             self.risk.clear_entry()
                         self.last_trade = {"action": "SELL", "size": executed_size,

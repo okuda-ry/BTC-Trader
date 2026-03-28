@@ -68,7 +68,7 @@ def build_summary(df: pd.DataFrame) -> dict:
             3,
         ),
         "price_change_1h": round(
-            float((price - closes.iloc[last - 1]) / closes.iloc[last - 1] * 100), 3
+            float((price - closes.iloc[max(0, last - 1)]) / closes.iloc[max(0, last - 1)] * 100), 3
         ),
         "price_change_4h": round(
             float((price - closes.iloc[max(0, last - 4)]) / closes.iloc[max(0, last - 4)] * 100), 3

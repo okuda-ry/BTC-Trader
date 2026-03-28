@@ -2,10 +2,12 @@
 import json
 import logging
 import os
+import threading
 
 logger = logging.getLogger(__name__)
 
 STATE_FILE = "risk_state.json"
+_state_lock = threading.Lock()
 
 
 def _load_all_state() -> dict | None:
@@ -54,19 +56,20 @@ class RiskManager:
                         f"{self.highest_price:,.0f}" if self.highest_price else "未記録")
 
     def _save_state(self):
-        data = _load_all_state()
-        if data is None:
-            logger.warning("[%s] risk_state.json の読み込み失敗のため保存スキップ", self.symbol)
-            return
-        if self.entry_price is not None:
-            data[self.symbol] = {
-                "entry_price": self.entry_price,
-                "entry_size": self.entry_size,
-                "highest_price": self.highest_price,
-            }
-        else:
-            data.pop(self.symbol, None)
-        _save_all_state(data)
+        with _state_lock:
+            data = _load_all_state()
+            if data is None:
+                logger.warning("[%s] risk_state.json の読み込み失敗のため保存スキップ", self.symbol)
+                return
+            if self.entry_price is not None:
+                data[self.symbol] = {
+                    "entry_price": self.entry_price,
+                    "entry_size": self.entry_size,
+                    "highest_price": self.highest_price,
+                }
+            else:
+                data.pop(self.symbol, None)
+            _save_all_state(data)
 
     def calc_order_size(self, jpy_balance: float, price: float,
                         current_balance: float = 0.0) -> float:
@@ -103,6 +106,7 @@ class RiskManager:
         else:
             self.entry_price = price
             self.entry_size = size
+            self.highest_price = price  # トレーリングストップの初期値
             logger.info("[%s] エントリー記録: ¥%s (%.6f)",
                         self.symbol, f"{price:,.0f}", size)
         self._save_state()
@@ -113,6 +117,12 @@ class RiskManager:
         self.highest_price = None
         self._save_state()
         logger.info("[%s] エントリークリア", self.symbol)
+
+    def reduce_size(self, sold_size: float):
+        """部分売却後にポジションサイズを減少させる。"""
+        self.entry_size = max(0.0, self.entry_size - sold_size)
+        self._save_state()
+        logger.info("[%s] ポジション縮小: 残 %.6f", self.symbol, self.entry_size)
 
     def update_trailing(self, current_price: float):
         """最高値を更新し、トレーリングストップラインを引き上げる。"""
