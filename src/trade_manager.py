@@ -5,6 +5,7 @@ from .gmo_client import GMOClient
 from .trader import CurrencyTrader
 from .candle_builder import get_candles
 from .indicators import build_summary
+from .notifier import notify_error
 from . import config
 
 logger = logging.getLogger(__name__)
@@ -46,8 +47,9 @@ class TradeManager:
                     other_summaries=other if other else None,
                     prefetched_summary=own_summary,
                 )
-            except Exception:
+            except Exception as e:
                 logger.exception("[%s] エラーが発生しました", symbol)
+                notify_error(f"[{symbol}] {type(e).__name__}: {e}")
 
     def run_loop(self):
         logger.info("=== TradeManager 開始 (dry_run=%s, 通貨=%s) ===",

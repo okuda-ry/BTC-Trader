@@ -6,7 +6,8 @@
     "size_decimals": 5,
     "max_position_ratio": 0.10,
     "stop_loss_pct": 0.02,
-    "take_profit_pct": 0.04
+    "take_profit_pct": 0.04,
+    "trailing_stop_pct": 0.02
   },
   "ETH": {
     "enabled": true,
@@ -15,7 +16,8 @@
     "size_decimals": 4,
     "max_position_ratio": 0.10,
     "stop_loss_pct": 0.03,
-    "take_profit_pct": 0.05
+    "take_profit_pct": 0.05,
+    "trailing_stop_pct": 0.02
   },
   "XRP": {
     "enabled": true,
@@ -24,7 +26,8 @@
     "size_decimals": 0,
     "max_position_ratio": 0.10,
     "stop_loss_pct": 0.03,
-    "take_profit_pct": 0.06
+    "take_profit_pct": 0.06,
+    "trailing_stop_pct": 0.03
   },
   "SOL": {
     "enabled": true,
@@ -33,6 +36,7 @@
     "size_decimals": 2,
     "max_position_ratio": 0.10,
     "stop_loss_pct": 0.03,
-    "take_profit_pct": 0.06
+    "take_profit_pct": 0.06,
+    "trailing_stop_pct": 0.03
   }
 }

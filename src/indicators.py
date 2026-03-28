@@ -73,4 +73,9 @@ def build_summary(df: pd.DataFrame) -> dict:
         "price_change_4h": round(
             float((price - closes.iloc[max(0, last - 4)]) / closes.iloc[max(0, last - 4)] * 100), 3
         ),
+        "volume": round(float(df["volume"].iloc[last]), 2) if "volume" in df.columns else 0,
+        "volume_avg_20": round(float(df["volume"].rolling(20).mean().iloc[last]), 2) if "volume" in df.columns else 0,
+        "volume_ratio": round(
+            float(df["volume"].iloc[last] / (df["volume"].rolling(20).mean().iloc[last] + 1e-9)), 2
+        ) if "volume" in df.columns else 0,
     }

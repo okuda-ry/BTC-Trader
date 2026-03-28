@@ -14,6 +14,7 @@ SYSTEM_PROMPT = """\
 - RSI: 30以下で売られすぎ（買いシグナル）、70以上で買われすぎ（売りシグナル）
 - MACD: ヒストグラムが正転で買い、負転で売り
 - ボリンジャーバンド: 下限タッチで反発買い、上限タッチで反落売り
+- 出来高比率: 1.0が平均。1.5以上で急増（トレンド確認）。出来高なしの価格変動はダマシの可能性
 - 複数指標が一致する方向に強いシグナル
 - 他通貨の動向も参考にすること（BTC下落時はアルトも連動しやすい）
 
@@ -37,6 +38,7 @@ def _build_user_message(symbol: str, summary: dict, position_size: float,
 - BB位置(0=下限, 1=上限): {summary['bb_position']}
 - 1時間変動率: {summary['price_change_1h']}%
 - 4時間変動率: {summary['price_change_4h']}%
+- 出来高: {summary.get('volume', 0)} (20期間平均: {summary.get('volume_avg_20', 0)}, 比率: {summary.get('volume_ratio', 0)}倍)
 - 現在保有量: {position_size} {symbol}"""
 
     if other_summaries:

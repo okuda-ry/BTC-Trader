@@ -36,8 +36,10 @@ class RiskManager:
         self.max_position_ratio = currency_config["max_position_ratio"]
         self.stop_loss_pct = currency_config["stop_loss_pct"]
         self.take_profit_pct = currency_config["take_profit_pct"]
+        self.trailing_stop_pct = currency_config.get("trailing_stop_pct", self.stop_loss_pct)
         self.entry_price: float | None = None
         self.entry_size: float = 0.0
+        self.highest_price: float | None = None  # トレーリングストップ用
         self._load_state()
 
     def _load_state(self):
@@ -45,9 +47,11 @@ class RiskManager:
         pos = data.get(self.symbol, {})
         self.entry_price = pos.get("entry_price")
         self.entry_size = pos.get("entry_size", 0.0)
+        self.highest_price = pos.get("highest_price")
         if self.entry_price is not None:
-            logger.info("[%s] エントリー復元: ¥%s (%.6f)",
-                        self.symbol, f"{self.entry_price:,.0f}", self.entry_size)
+            logger.info("[%s] エントリー復元: ¥%s (%.6f) 最高値=¥%s",
+                        self.symbol, f"{self.entry_price:,.0f}", self.entry_size,
+                        f"{self.highest_price:,.0f}" if self.highest_price else "未記録")
 
     def _save_state(self):
         data = _load_all_state()
@@ -58,6 +62,7 @@ class RiskManager:
             data[self.symbol] = {
                 "entry_price": self.entry_price,
                 "entry_size": self.entry_size,
+                "highest_price": self.highest_price,
             }
         else:
             data.pop(self.symbol, None)
@@ -105,15 +110,42 @@ class RiskManager:
     def clear_entry(self):
         self.entry_price = None
         self.entry_size = 0.0
+        self.highest_price = None
         self._save_state()
         logger.info("[%s] エントリークリア", self.symbol)
 
+    def update_trailing(self, current_price: float):
+        """最高値を更新し、トレーリングストップラインを引き上げる。"""
+        if self.entry_price is None:
+            return
+        if self.highest_price is None or current_price > self.highest_price:
+            self.highest_price = current_price
+            self._save_state()
+            logger.debug("[%s] 最高値更新: ¥%s", self.symbol, f"{current_price:,.0f}")
+
     def should_stop_loss(self, current_price: float) -> bool:
+        """エントリー価格からの固定損切り判定。"""
         if self.entry_price is None:
             return False
         return (current_price - self.entry_price) / self.entry_price <= -self.stop_loss_pct
 
-    def should_take_profit(self, current_price: float) -> bool:
-        if self.entry_price is None:
+    def should_trailing_stop(self, current_price: float) -> bool:
+        """トレーリングストップ判定。
+
+        利確ラインを超えた後、最高値から trailing_stop_pct 下落したら発動。
+        利確ライン未達なら発動しない（固定損切りのみ有効）。
+        """
+        if self.entry_price is None or self.highest_price is None:
             return False
-        return (current_price - self.entry_price) / self.entry_price >= self.take_profit_pct
+        # まず利確ラインを超えているか
+        profit_pct = (self.highest_price - self.entry_price) / self.entry_price
+        if profit_pct < self.take_profit_pct:
+            return False
+        # 最高値からの下落率
+        drop_from_high = (current_price - self.highest_price) / self.highest_price
+        if drop_from_high <= -self.trailing_stop_pct:
+            logger.info("[%s] トレーリングストップ: 最高値¥%s → 現在¥%s (%.1f%%下落)",
+                        self.symbol, f"{self.highest_price:,.0f}",
+                        f"{current_price:,.0f}", drop_from_high * 100)
+            return True
+        return False

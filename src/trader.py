@@ -6,6 +6,7 @@ from .indicators import build_summary
 from .ai_analyzer import analyze
 from .risk_manager import RiskManager
 from .database import record_trade
+from .notifier import notify_trade, notify_stop_loss, notify_take_profit, notify_error
 from . import config
 
 logger = logging.getLogger(__name__)
@@ -65,16 +66,19 @@ class CurrencyTrader:
         min_size = self.currency_config["min_order_size"]
         has_position = balance >= min_size
 
-        # 4. 損切り・利確チェック（ポジション保有時）
+        # 4. 損切り・トレーリングストップチェック（ポジション保有時）
         if has_position and self.risk.entry_price is not None:
+            self.risk.update_trailing(current_price)
             if self.risk.should_stop_loss(current_price):
                 logger.warning("[%s] 損切り発動! entry=¥%s → now=¥%s",
                                self.symbol, f"{self.risk.entry_price:,.0f}", f"{current_price:,.0f}")
+                notify_stop_loss(self.symbol, self.risk.entry_price, current_price, balance)
                 self._execute_sell(balance, current_price, force_market=True)
                 return
-            if self.risk.should_take_profit(current_price):
-                logger.info("[%s] 利確発動! entry=¥%s → now=¥%s",
-                            self.symbol, f"{self.risk.entry_price:,.0f}", f"{current_price:,.0f}")
+            if self.risk.should_trailing_stop(current_price):
+                logger.info("[%s] トレーリングストップ発動! 最高値=¥%s → now=¥%s",
+                            self.symbol, f"{self.risk.highest_price:,.0f}", f"{current_price:,.0f}")
+                notify_take_profit(self.symbol, self.risk.entry_price, current_price, balance)
                 self._execute_sell(balance, current_price)
                 return
 
@@ -227,12 +231,15 @@ class CurrencyTrader:
                     self.last_trade = {"action": "BUY", "size": executed_size,
                                        "price": order_price, "reason": "指値約定"}
                     record_trade(self.symbol, "BUY", executed_size, order_price, "指値約定")
+                    notify_trade(self.symbol, "BUY", executed_size, order_price, "指値約定")
                 else:
                     entry_px = self.risk.entry_price
+                    pnl = (order_price - entry_px) * executed_size if entry_px else None
                     self.risk.clear_entry()
                     self.last_trade = {"action": "SELL", "size": executed_size,
                                        "price": order_price, "reason": "指値約定"}
                     record_trade(self.symbol, "SELL", executed_size, order_price, "指値約定", entry_price=entry_px)
+                    notify_trade(self.symbol, "SELL", executed_size, order_price, "指値約定", pnl_jpy=pnl)
 
             elif status in ("CANCELED", "EXPIRED"):
                 if executed_size > 0:
