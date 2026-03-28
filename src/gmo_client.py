@@ -5,7 +5,7 @@ import json
 import logging
 import time
 import requests
-import config
+from . import config
 
 logger = logging.getLogger(__name__)
 

@@ -1,11 +1,11 @@
 """全通貨を管理するオーケストレーター"""
 import logging
 import time
-from gmo_client import GMOClient
-from trader import CurrencyTrader
-from candle_builder import get_candles
-from indicators import build_summary
-import config
+from .gmo_client import GMOClient
+from .trader import CurrencyTrader
+from .candle_builder import get_candles
+from .indicators import build_summary
+from . import config
 
 logger = logging.getLogger(__name__)
 

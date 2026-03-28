@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-DB_FILE = os.path.join(os.path.dirname(__file__), "trades.db")
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_FILE = os.path.join(_PROJECT_ROOT, "trades.db")
 
 
 def _connect():

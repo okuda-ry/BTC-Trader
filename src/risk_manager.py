@@ -75,7 +75,7 @@ class RiskManager:
         target_jpy = total_assets * self.max_position_ratio
         gap_jpy = target_jpy - position_value
 
-        from config import MIN_TRADE_JPY
+        from .config import MIN_TRADE_JPY
         if gap_jpy < MIN_TRADE_JPY:
             return 0.0
 

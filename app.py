@@ -4,9 +4,9 @@ import threading
 import sys
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request
-from trade_manager import TradeManager
-from database import init_db, get_trades, get_stats, get_daily_pnl
-import config
+from src.trade_manager import TradeManager
+from src.database import init_db, get_trades, get_stats, get_daily_pnl
+from src import config
 
 # ---- ログ ----
 class LogBuffer(logging.Handler):

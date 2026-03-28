@@ -1,7 +1,7 @@
 """テクニカル指標の計算"""
 import numpy as np
 import pandas as pd
-import config
+from . import config
 
 
 def calc_rsi(closes: pd.Series, period: int = config.RSI_PERIOD) -> pd.Series:

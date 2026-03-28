@@ -1,12 +1,12 @@
 """通貨ごとのトレーディングロジック"""
 import logging
-from gmo_client import GMOClient
-from candle_builder import get_candles
-from indicators import build_summary
-from ai_analyzer import analyze
-from risk_manager import RiskManager
-from database import record_trade
-import config
+from .gmo_client import GMOClient
+from .candle_builder import get_candles
+from .indicators import build_summary
+from .ai_analyzer import analyze
+from .risk_manager import RiskManager
+from .database import record_trade
+from . import config
 
 logger = logging.getLogger(__name__)
 

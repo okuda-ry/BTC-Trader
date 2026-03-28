@@ -31,7 +31,8 @@ LIMIT_OFFSET_PCT = 0.05
 MIN_TRADE_JPY = 1000
 
 # --- 通貨設定の読み込み ---
-_CURRENCIES_FILE = os.path.join(os.path.dirname(__file__), "currencies.json")
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_CURRENCIES_FILE = os.path.join(_PROJECT_ROOT, "currencies.json")
 
 def load_currencies() -> dict:
     with open(_CURRENCIES_FILE, "r", encoding="utf-8") as f:

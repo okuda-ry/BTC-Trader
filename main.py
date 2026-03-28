@@ -2,7 +2,7 @@
 import argparse
 import logging
 import sys
-from trade_manager import TradeManager
+from src.trade_manager import TradeManager
 
 
 def setup_logging(level: str = "INFO"):
