@@ -5,6 +5,7 @@ from candle_builder import get_candles
 from indicators import build_summary
 from ai_analyzer import analyze
 from risk_manager import RiskManager
+from database import record_trade
 import config
 
 logger = logging.getLogger(__name__)
@@ -139,10 +140,12 @@ class CurrencyTrader:
                 # 成行なら即約定とみなす
                 self.risk.set_entry(price, size)
                 self.last_trade = {"action": "BUY", "size": size, "price": price, "reason": "成行約定"}
+                record_trade(self.symbol, "BUY", size, price, "成行約定")
         else:
             logger.info("[%s] [DRY RUN] 注文スキップ", self.symbol)
             self.risk.set_entry(price, size)
             self.last_trade = {"action": "BUY", "size": size, "price": price, "reason": "DRY RUN"}
+            record_trade(self.symbol, "BUY", size, price, "DRY RUN")
 
     def _execute_sell(self, size: float, price: float, force_market: bool = False):
         order_type = "MARKET" if force_market else config.ORDER_TYPE
@@ -167,12 +170,16 @@ class CurrencyTrader:
                     logger.warning("[%s] 指値注文のorder_idが取得できませんでした", self.symbol)
             else:
                 # 成行なら即約定
+                entry_px = self.risk.entry_price
                 self.risk.clear_entry()
                 self.last_trade = {"action": "SELL", "size": size, "price": price, "reason": "成行約定"}
+                record_trade(self.symbol, "SELL", size, price, "成行約定", entry_price=entry_px)
         else:
             logger.info("[%s] [DRY RUN] 注文スキップ", self.symbol)
+            entry_px = self.risk.entry_price
             self.risk.clear_entry()
             self.last_trade = {"action": "SELL", "size": size, "price": price, "reason": "DRY RUN"}
+            record_trade(self.symbol, "SELL", size, price, "DRY RUN", entry_price=entry_px)
 
     def _check_pending_order(self):
         """未約定注文の状態確認。約定時のみ取引を記録。"""
@@ -208,10 +215,13 @@ class CurrencyTrader:
                     self.risk.set_entry(order_price, executed_size)
                     self.last_trade = {"action": "BUY", "size": executed_size,
                                        "price": order_price, "reason": "指値約定"}
+                    record_trade(self.symbol, "BUY", executed_size, order_price, "指値約定")
                 else:
+                    entry_px = self.risk.entry_price
                     self.risk.clear_entry()
                     self.last_trade = {"action": "SELL", "size": executed_size,
                                        "price": order_price, "reason": "指値約定"}
+                    record_trade(self.symbol, "SELL", executed_size, order_price, "指値約定", entry_price=entry_px)
 
             elif status in ("CANCELED", "EXPIRED"):
                 if executed_size > 0:
@@ -222,8 +232,10 @@ class CurrencyTrader:
                         self.risk.set_entry(order_price, executed_size)
                         self.last_trade = {"action": "BUY", "size": executed_size,
                                            "price": order_price, "reason": "部分約定"}
+                        record_trade(self.symbol, "BUY", executed_size, order_price, "部分約定")
                     else:
                         # SELL部分約定: 残りのポジションを更新
+                        entry_px = self.risk.entry_price
                         remaining = self.risk.entry_size - executed_size
                         if remaining >= self.currency_config["min_order_size"]:
                             self.risk.entry_size = remaining
@@ -233,6 +245,7 @@ class CurrencyTrader:
                             self.risk.clear_entry()
                         self.last_trade = {"action": "SELL", "size": executed_size,
                                            "price": order_price, "reason": "部分約定"}
+                        record_trade(self.symbol, "SELL", executed_size, order_price, "部分約定", entry_price=entry_px)
                 else:
                     logger.info("[%s] 注文キャンセル/期限切れ（約定なし）", self.symbol)
 
@@ -247,6 +260,7 @@ class CurrencyTrader:
                         self.risk.set_entry(order_price, executed_size)
                         self.last_trade = {"action": "BUY", "size": executed_size,
                                            "price": order_price, "reason": "部分約定(残キャンセル)"}
+                        record_trade(self.symbol, "BUY", executed_size, order_price, "部分約定(残キャンセル)")
 
             self._pending_order_id = None
             self._pending_side = None

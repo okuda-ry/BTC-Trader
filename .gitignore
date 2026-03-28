@@ -16,6 +16,7 @@ logs/
 
 # Runtime state
 risk_state.json
+trades.db
 
 # IDE
 .vscode/

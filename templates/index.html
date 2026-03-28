@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Crypto Auto Trader</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <header>
@@ -70,13 +71,47 @@
         </div>
       </section>
 
+      <!-- 統計パネル -->
+      <section class="stats-box">
+        <h2>パフォーマンス</h2>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <span class="stat-label">累計損益</span>
+            <span class="stat-value" id="statPnl">---</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">勝率</span>
+            <span class="stat-value" id="statWinRate">---</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">取引回数</span>
+            <span class="stat-value" id="statTrades">---</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">勝/負</span>
+            <span class="stat-value" id="statWinLoss">---</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">平均損益%</span>
+            <span class="stat-value" id="statAvgPnl">---</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">最大利益</span>
+            <span class="stat-value" id="statBest">---</span>
+          </div>
+        </div>
+        <div class="pnl-chart-wrap">
+          <canvas id="pnlChart" height="150"></canvas>
+        </div>
+      </section>
+
       <div class="bottom-panels">
         <section class="panel">
           <h2>取引履歴</h2>
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>時刻</th><th>売買</th><th>数量</th><th>価格</th><th>理由</th></tr>
+                <tr><th>時刻</th><th>売買</th><th>数量</th><th>価格</th><th>損益</th><th>理由</th></tr>
               </thead>
               <tbody id="tradeHistory"></tbody>
             </table>
@@ -202,17 +237,23 @@
         document.getElementById('decisionReason').textContent = '';
       }
 
-      // 取引履歴
+      // 取引履歴（DB から取得、既に新しい順）
       const history = cur.trade_history || [];
-      document.getElementById('tradeHistory').innerHTML = history.slice().reverse().map(t =>
-        `<tr class="trade-${t.action.toLowerCase()}">
-          <td>${t.time}</td>
+      document.getElementById('tradeHistory').innerHTML = history.map(t => {
+        let pnlCell = '-';
+        if (t.action === 'SELL' && t.pnl_jpy !== null) {
+          const cls = t.pnl_jpy >= 0 ? 'text-green' : 'text-red';
+          pnlCell = `<span class="${cls}">¥${Math.round(t.pnl_jpy).toLocaleString()} (${t.pnl_pct}%)</span>`;
+        }
+        return `<tr class="trade-${t.action.toLowerCase()}">
+          <td>${t.timestamp}</td>
           <td><strong>${t.action}</strong></td>
           <td>${t.size}</td>
-          <td>¥${t.price.toLocaleString()}</td>
-          <td>${t.reason}</td>
-        </tr>`
-      ).join('');
+          <td>¥${Math.round(t.price).toLocaleString()}</td>
+          <td>${pnlCell}</td>
+          <td>${t.reason || ''}</td>
+        </tr>`;
+      }).join('');
 
       // ログ
       const logArea = document.getElementById('logArea');
@@ -223,6 +264,62 @@
       if (wasAtBottom) logArea.scrollTop = logArea.scrollHeight;
     }
 
+    // 損益グラフ
+    let pnlChart = null;
+
+    function updateStats(stats) {
+      if (!stats || !stats.overall) return;
+      const s = stats.overall;
+      const pnlEl = document.getElementById('statPnl');
+      pnlEl.textContent = '¥' + s.total_pnl_jpy.toLocaleString();
+      pnlEl.className = 'stat-value ' + (s.total_pnl_jpy >= 0 ? 'text-green' : 'text-red');
+      document.getElementById('statWinRate').textContent = s.win_rate + '%';
+      document.getElementById('statTrades').textContent = s.total_trades;
+      document.getElementById('statWinLoss').textContent = s.wins + ' / ' + s.losses;
+      const avgEl = document.getElementById('statAvgPnl');
+      avgEl.textContent = s.avg_pnl_pct + '%';
+      avgEl.className = 'stat-value ' + (s.avg_pnl_pct >= 0 ? 'text-green' : 'text-red');
+      document.getElementById('statBest').textContent = '¥' + s.best_trade_jpy.toLocaleString();
+    }
+
+    function updatePnlChart(dailyData) {
+      if (!dailyData || dailyData.length === 0) return;
+      const ctx = document.getElementById('pnlChart').getContext('2d');
+      const labels = dailyData.map(d => d.date);
+      const cumData = dailyData.map(d => d.cumulative_pnl);
+
+      if (pnlChart) {
+        pnlChart.data.labels = labels;
+        pnlChart.data.datasets[0].data = cumData;
+        pnlChart.update();
+      } else {
+        pnlChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: '累計損益 (¥)',
+              data: cumData,
+              borderColor: '#3498db',
+              backgroundColor: 'rgba(52,152,219,0.1)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 3,
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { color: '#888' }, grid: { color: '#333' } },
+              y: { ticks: { color: '#888', callback: v => '¥' + v.toLocaleString() }, grid: { color: '#333' } }
+            }
+          }
+        });
+      }
+    }
+
     async function poll() {
       try {
         const resp = await fetch('/api/status');
@@ -230,8 +327,21 @@
       } catch (e) { /* ignore */ }
     }
 
+    async function pollStats() {
+      try {
+        const [statsResp, pnlResp] = await Promise.all([
+          fetch('/api/stats'),
+          fetch('/api/daily_pnl'),
+        ]);
+        if (statsResp.ok) updateStats(await statsResp.json());
+        if (pnlResp.ok) updatePnlChart(await pnlResp.json());
+      } catch (e) { /* ignore */ }
+    }
+
     setInterval(poll, 3000);
+    setInterval(pollStats, 15000);
     poll();
+    pollStats();
   </script>
 </body>
 </html>

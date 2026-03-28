@@ -5,6 +5,7 @@ import sys
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request
 from trade_manager import TradeManager
+from database import init_db, get_trades, get_stats, get_daily_pnl
 import config
 
 # ---- ログ ----
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 # ---- アプリ状態 ----
 app = Flask(__name__)
+init_db()
 
 state = {
     "running": False,
@@ -111,7 +113,7 @@ def api_status():
                 "decision": trader.last_decision,
                 "entry_price": trader.risk.entry_price,
                 "entry_size": trader.risk.entry_size,
-                "trade_history": state["trade_history"].get(symbol, [])[-10:],
+                "trade_history": get_trades(symbol, limit=10),
             }
 
     return jsonify({
@@ -120,6 +122,29 @@ def api_status():
         "currencies": currencies_status,
         "logs": log_buffer.logs[-80:],
     })
+
+
+@app.route("/api/stats")
+def api_stats():
+    symbol = request.args.get("symbol")
+    return jsonify({
+        "overall": get_stats(),
+        "by_symbol": get_stats(symbol) if symbol else None,
+    })
+
+
+@app.route("/api/trades")
+def api_trades():
+    symbol = request.args.get("symbol")
+    limit = request.args.get("limit", 100, type=int)
+    return jsonify(get_trades(symbol, limit))
+
+
+@app.route("/api/daily_pnl")
+def api_daily_pnl():
+    symbol = request.args.get("symbol")
+    days = request.args.get("days", 30, type=int)
+    return jsonify(get_daily_pnl(days, symbol))
 
 
 @app.route("/api/start", methods=["POST"])
